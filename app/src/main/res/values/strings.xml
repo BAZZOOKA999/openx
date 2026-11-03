@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">OpenX</string>
+    <string name="nav_home">Início</string>
+    <string name="nav_projects">Projetos</string>
+    <string name="nav_translate">Tradução</string>
+    <string name="nav_files">Arquivos</string>
+    <string name="nav_settings">Ajustes</string>
+    <string name="status_pending">Pendente</string>
+    <string name="status_translated">Traduzido</string>
+    <string name="status_reviewed">Revisado</string>
+    <string name="status_error">Erro</string>
+</resources>
