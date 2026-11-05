@@ -252,6 +252,50 @@ fun HomeScreen(
             }
         }
 
+        // OpenX Player Banner (NEW)
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .border(1.dp, OpenXRed.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+                    .clickable { onNavigate(ScreenDestination.PlayerLibrary) }
+                    .testTag("card_open_player_library"),
+                colors = CardDefaults.cardColors(containerColor = OpenXSurface)
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(OpenXRed),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.PlayCircle, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("OpenX Player (Jogos Ren'Py)", fontWeight = FontWeight.Black, color = OpenXTextPrimary, fontSize = 13.sp)
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(OpenXRedContainer)
+                                    .padding(horizontal = 5.dp, vertical = 1.dp)
+                            ) {
+                                Text("NOVO", color = OpenXRedLight, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Text("Executar jogos PC no Android, saves isolados e tradução", color = OpenXTextSecondary, fontSize = 11.sp)
+                    }
+                    Icon(androidx.compose.material.icons.Icons.Default.ChevronRight, null, tint = OpenXRedLight)
+                }
+            }
+        }
+
         // Quick Actions Grid (4 primary buttons required by user)
         item {
             Text(

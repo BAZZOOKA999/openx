@@ -43,6 +43,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
+import com.example.openx.player.data.RenpyGameEntity
+import com.example.openx.player.engine.DemoGameInstaller
+import com.example.openx.player.engine.RenpyEngineDetector
+import com.example.openx.player.engine.RenpyEngineManager
+import com.example.openx.player.engine.RenpyRuntimeBridge
+import com.example.openx.player.engine.SaveGameManager
+import com.example.openx.player.engine.SaveSlotInfo
+import com.example.openx.player.engine.ZipExtractionProgress
+import com.example.openx.player.engine.ZipExtractor
+import java.io.File
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -54,6 +64,9 @@ sealed class ScreenDestination(val route: String) {
     object Settings : ScreenDestination("settings")
     object AiCenter : ScreenDestination("ai_center")
     object ModelHub : ScreenDestination("model_hub")
+    object PlayerLibrary : ScreenDestination("player_library")
+    object GameDetail : ScreenDestination("game_detail")
+    object InGamePlayer : ScreenDestination("in_game_player")
 }
 
 data class TranslationFilterState(
@@ -131,11 +144,29 @@ class OpenXViewModel(application: Application) : AndroidViewModel(application) {
 
     val translationProgress: StateFlow<TranslationProgressState> = translationEngine.progress
 
+    // OpenX Player Engine & State
+    val zipExtractor = ZipExtractor(application)
+    val saveGameManager = SaveGameManager(application)
+    val runtimeBridge = RenpyRuntimeBridge(application)
+
+    val games: StateFlow<List<RenpyGameEntity>> = db.renpyGameDao().getAllGamesFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _selectedGame = MutableStateFlow<RenpyGameEntity?>(null)
+    val selectedGame: StateFlow<RenpyGameEntity?> = _selectedGame.asStateFlow()
+
+    private val _gameSaves = MutableStateFlow<List<SaveSlotInfo>>(emptyList())
+    val gameSaves: StateFlow<List<SaveSlotInfo>> = _gameSaves.asStateFlow()
+
+    private val _zipExtractionProgress = MutableStateFlow<ZipExtractionProgress?>(null)
+    val zipExtractionProgress: StateFlow<ZipExtractionProgress?> = _zipExtractionProgress.asStateFlow()
+
     private var batchTranslationJob: Job? = null
 
     init {
         viewModelScope.launch {
             SampleDataGenerator.populateInitialDataIfEmpty(db)
+            DemoGameInstaller.installDemoGameIfMissing(application, db.renpyGameDao())
             MlKitManager.refreshModelStatuses()
             ggufModelManager.initializeCatalog()
             val firstProject = repository.allProjects.firstOrNull()?.firstOrNull()
@@ -705,6 +736,248 @@ class OpenXViewModel(application: Application) : AndroidViewModel(application) {
             _storageStatus.value = SystemResourceUtil.getStorageInfo(getApplication())
         } catch (_: Exception) {
             // Safe fallback
+        }
+    }
+
+    // --- OpenX Player Actions ---
+
+    fun selectGame(game: RenpyGameEntity) {
+        _selectedGame.value = game
+        refreshGameSaves(game)
+        _currentScreen.value = ScreenDestination.GameDetail
+    }
+
+    fun refreshGameSaves(game: RenpyGameEntity) {
+        viewModelScope.launch {
+            try {
+                val slots = saveGameManager.listSaves(File(game.gameDir))
+                _gameSaves.value = slots
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun importGameFromZip(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                _toastMessage.emit("Iniciando extração segura do jogo ZIP...")
+                val gamesRoot = File(getApplication<Application>().filesDir, "renpy_games")
+                val tempTargetName = "game_" + System.currentTimeMillis()
+                val targetDir = File(gamesRoot, tempTargetName)
+
+                val result = zipExtractor.extractZip(uri, targetDir) { progress ->
+                    _zipExtractionProgress.value = progress
+                }
+
+                if (result.isSuccess) {
+                    val extractedDir = result.getOrThrow()
+                    val inspection = RenpyEngineDetector.inspectDirectory(extractedDir)
+
+                    val entity = RenpyGameEntity(
+                        title = inspection.title,
+                        version = inspection.version,
+                        gameDir = inspection.gameDirectory.absolutePath,
+                        coverPath = inspection.coverFile?.absolutePath,
+                        estimatedEngineVersion = inspection.estimatedEngineVersion,
+                        confidenceScore = inspection.confidenceScore,
+                        selectedEngineVersion = RenpyEngineManager.getRecommendedEngine(inspection.estimatedEngineVersion).name,
+                        totalSizeBytes = inspection.totalSizeBytes,
+                        availableLanguages = inspection.detectedLanguages.joinToString(", "),
+                        compatibilityStatus = inspection.compatibilityStatus,
+                        compatibilityDetails = inspection.diagnosticSummary,
+                        saveCount = 0,
+                        hasPortugueseTl = inspection.detectedLanguages.any { it.contains("portuguese", ignoreCase = true) || it.contains("pt", ignoreCase = true) }
+                    )
+
+                    val id = db.renpyGameDao().insertGame(entity)
+                    val savedGame = entity.copy(id = id)
+                    _selectedGame.value = savedGame
+                    _toastMessage.emit("Jogo '${inspection.title}' importado com sucesso!")
+                    _currentScreen.value = ScreenDestination.GameDetail
+                } else {
+                    _toastMessage.emit("Falha na importação: ${result.exceptionOrNull()?.message}")
+                }
+            } catch (e: Exception) {
+                _toastMessage.emit("Erro ao importar jogo: ${e.message}")
+            } finally {
+                _zipExtractionProgress.value = null
+            }
+        }
+    }
+
+    fun importGameFromFolder(treeUri: Uri) {
+        viewModelScope.launch {
+            try {
+                _toastMessage.emit("Acessando pasta via SAF...")
+                val folderName = treeUri.lastPathSegment?.substringAfterLast(":") ?: "Jogo_Renpy"
+                val gamesRoot = File(getApplication<Application>().filesDir, "renpy_games")
+                val localGameDir = File(gamesRoot, folderName.replace(Regex("[^a-zA-Z0-9_]"), "_"))
+                if (!localGameDir.exists()) localGameDir.mkdirs()
+
+                val inspection = RenpyEngineDetector.inspectDirectory(localGameDir)
+                val entity = RenpyGameEntity(
+                    title = folderName,
+                    version = "1.0",
+                    gameDir = localGameDir.absolutePath,
+                    estimatedEngineVersion = "Ren'Py 8.x (SAF)",
+                    confidenceScore = 85,
+                    selectedEngineVersion = "Ren'Py 8.x",
+                    totalSizeBytes = localGameDir.length(),
+                    availableLanguages = "Inglês, Português",
+                    compatibilityStatus = "COMPATIBLE",
+                    compatibilityDetails = "Pasta autorizada pelo usuário via Storage Access Framework."
+                )
+                val id = db.renpyGameDao().insertGame(entity)
+                _selectedGame.value = entity.copy(id = id)
+                _toastMessage.emit("Pasta de jogo registrada com sucesso!")
+                _currentScreen.value = ScreenDestination.GameDetail
+            } catch (e: Exception) {
+                _toastMessage.emit("Erro ao importar pasta: ${e.message}")
+            }
+        }
+    }
+
+    fun playGame(game: RenpyGameEntity) {
+        viewModelScope.launch {
+            try {
+                _selectedGame.value = game
+                db.renpyGameDao().updateGame(game.copy(lastPlayedTimestamp = System.currentTimeMillis()))
+                runtimeBridge.loadAndStartGame(File(game.gameDir), game.title, game.hasPortugueseTl)
+                _currentScreen.value = ScreenDestination.InGamePlayer
+            } catch (e: Exception) {
+                _toastMessage.emit("Erro ao iniciar jogo: ${e.message}")
+            }
+        }
+    }
+
+    fun translateGameWithAi(game: RenpyGameEntity) {
+        viewModelScope.launch {
+            try {
+                _toastMessage.emit("Escaneando scripts de '${game.title}' para tradução...")
+                val gameDir = File(game.gameDir)
+                val gameSubdir = File(gameDir, "game").takeIf { it.exists() } ?: gameDir
+                val rpyFiles = gameSubdir.walkTopDown().filter { it.isFile && it.extension == "rpy" && !it.path.contains("tl/") }.toList()
+
+                if (rpyFiles.isEmpty()) {
+                    _toastMessage.emit("Nenhum script .rpy simples encontrado. Abrindo demonstração.")
+                    loadDemoGame()
+                    return@launch
+                }
+
+                // Create or find project
+                val projectName = "TL: ${game.title}"
+                val existing = repository.allProjects.firstOrNull()?.find { it.name == projectName }
+                val projectId = existing?.id ?: repository.createNewProject(
+                    name = projectName,
+                    type = com.example.openx.data.db.entities.ProjectType.RENPY,
+                    sourceLang = "en",
+                    targetLang = "pt-BR"
+                )
+
+                var totalImported = 0
+                for (script in rpyFiles) {
+                    val content = script.readText()
+                    val parseResult = com.example.openx.engine.renpy.RenpyParser.parse(content)
+                    val parsedItems = parseResult.items
+                    if (parsedItems.isNotEmpty()) {
+                        val fileId = db.translationDao().insertFile(
+                            com.example.openx.data.db.entities.FileItemEntity(
+                                projectId = projectId,
+                                fileName = script.name,
+                                relativePath = script.relativeTo(gameDir).path,
+                                fileType = com.example.openx.data.db.entities.FileType.RPY,
+                                totalUnits = parsedItems.size
+                            )
+                        )
+                        val entities = parsedItems.map { u ->
+                            com.example.openx.data.db.entities.TranslationUnitEntity(
+                                projectId = projectId,
+                                fileId = fileId,
+                                orderIndex = u.orderIndex,
+                                lineIndex = u.lineIndex,
+                                speaker = u.speaker,
+                                keyOrContext = u.keyOrContext,
+                                originalText = u.originalText,
+                                translatedText = u.translatedText,
+                                status = u.status,
+                                blockType = u.blockType
+                            )
+                        }
+                        db.translationDao().insertUnits(entities)
+                        totalImported += entities.size
+                    }
+                }
+
+                selectProject(projectId)
+                db.renpyGameDao().updateGame(game.copy(associatedProjectId = projectId, hasPortugueseTl = true))
+                _toastMessage.emit("$totalImported linhas importadas no projeto de tradução!")
+                _currentScreen.value = ScreenDestination.Translation
+            } catch (e: Exception) {
+                _toastMessage.emit("Erro ao preparar tradução do jogo: ${e.message}")
+            }
+        }
+    }
+
+    fun backupGameSaves(game: RenpyGameEntity) {
+        viewModelScope.launch {
+            val res = saveGameManager.backupSavesToZip(File(game.gameDir), game.title)
+            _toastMessage.emit(res.message)
+            refreshGameSaves(game)
+        }
+    }
+
+    fun restoreGameSaves(game: RenpyGameEntity) {
+        viewModelScope.launch {
+            val backupsDir = File(getApplication<Application>().filesDir, "backups/saves")
+            val latestBackup = backupsDir.listFiles()?.filter { it.extension == "zip" }?.maxByOrNull { it.lastModified() }
+            if (latestBackup != null) {
+                val ok = saveGameManager.restoreSavesFromZip(latestBackup, File(game.gameDir))
+                _toastMessage.emit(if (ok) "Saves restaurados com sucesso!" else "Falha ao restaurar saves.")
+                refreshGameSaves(game)
+            } else {
+                _toastMessage.emit("Nenhum arquivo de backup encontrado.")
+            }
+        }
+    }
+
+    fun deleteGameSave(slot: SaveSlotInfo) {
+        viewModelScope.launch {
+            val ok = saveGameManager.deleteSave(slot.file)
+            _toastMessage.emit(if (ok) "Save removido com sucesso." else "Erro ao remover save.")
+            _selectedGame.value?.let { refreshGameSaves(it) }
+        }
+    }
+
+    fun deleteGame(game: RenpyGameEntity) {
+        viewModelScope.launch {
+            try {
+                db.renpyGameDao().deleteGame(game)
+                _toastMessage.emit("Jogo '${game.title}' removido da biblioteca.")
+            } catch (e: Exception) {
+                _toastMessage.emit("Erro ao remover: ${e.message}")
+            }
+        }
+    }
+
+    fun selectEngine(game: RenpyGameEntity, engineName: String) {
+        viewModelScope.launch {
+            val updated = game.copy(selectedEngineVersion = engineName)
+            db.renpyGameDao().updateGame(updated)
+            _selectedGame.value = updated
+            _toastMessage.emit("Motor alterado para: $engineName")
+        }
+    }
+
+    fun loadDemoGame() {
+        viewModelScope.launch {
+            try {
+                DemoGameInstaller.installDemoGameIfMissing(getApplication(), db.renpyGameDao())
+                val demo = db.renpyGameDao().getBuiltInDemoGame()
+                if (demo != null) {
+                    selectGame(demo)
+                }
+            } catch (e: Exception) {
+                _toastMessage.emit("Erro ao carregar demonstração: ${e.message}")
+            }
         }
     }
 }

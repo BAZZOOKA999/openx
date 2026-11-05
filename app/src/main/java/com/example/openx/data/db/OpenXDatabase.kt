@@ -29,9 +29,10 @@ import com.example.openx.data.db.entities.UserSessionEntity
         UserSessionEntity::class,
         TranslationMemoryEntity::class,
         BatchQueueItemEntity::class,
-        GgufModelEntity::class
+        GgufModelEntity::class,
+        com.example.openx.player.data.RenpyGameEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class OpenXDatabase : RoomDatabase() {
@@ -42,6 +43,7 @@ abstract class OpenXDatabase : RoomDatabase() {
     abstract fun translationMemoryDao(): TranslationMemoryDao
     abstract fun batchQueueDao(): BatchQueueDao
     abstract fun ggufModelDao(): GgufModelDao
+    abstract fun renpyGameDao(): com.example.openx.player.data.RenpyGameDao
 
     companion object {
         @Volatile

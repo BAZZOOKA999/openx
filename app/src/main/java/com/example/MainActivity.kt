@@ -67,6 +67,9 @@ import com.example.openx.ui.screens.ModelHubScreen
 import com.example.openx.ui.screens.ProjectsScreen
 import com.example.openx.ui.screens.SettingsScreen
 import com.example.openx.ui.screens.TranslationScreen
+import com.example.openx.player.ui.GameLibraryScreen
+import com.example.openx.player.ui.GameDetailScreen
+import com.example.openx.player.ui.PlayerScreen
 import com.example.openx.ui.theme.OpenXBackground
 import com.example.openx.ui.theme.OpenXError
 import com.example.openx.ui.theme.OpenXRed
@@ -253,9 +256,18 @@ fun OpenXApp(viewModel: OpenXViewModel = viewModel()) {
         return
     }
 
-    // Back handler: pop sub-screens back to Home
-    BackHandler(enabled = currentScreen != ScreenDestination.Home) {
-        viewModel.navigateTo(ScreenDestination.Home)
+    val games by viewModel.games.collectAsState()
+    val selectedGame by viewModel.selectedGame.collectAsState()
+    val gameSaves by viewModel.gameSaves.collectAsState()
+    val zipExtractionProgress by viewModel.zipExtractionProgress.collectAsState()
+
+    // Back handler: pop sub-screens back appropriately
+    BackHandler(enabled = currentScreen != ScreenDestination.Home && currentScreen != ScreenDestination.InGamePlayer) {
+        when (currentScreen) {
+            ScreenDestination.GameDetail -> viewModel.navigateTo(ScreenDestination.PlayerLibrary)
+            ScreenDestination.PlayerLibrary -> viewModel.navigateTo(ScreenDestination.Home)
+            else -> viewModel.navigateTo(ScreenDestination.Home)
+        }
     }
 
     Scaffold(
@@ -263,31 +275,41 @@ fun OpenXApp(viewModel: OpenXViewModel = viewModel()) {
         containerColor = OpenXBackground,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            val title = when (currentScreen) {
-                ScreenDestination.Home -> "OpenX"
-                ScreenDestination.Projects -> "Projetos"
-                ScreenDestination.Translation -> "Editor de Tradução"
-                ScreenDestination.Files -> "Arquivos & APK"
-                ScreenDestination.Settings -> "Configurações"
-                ScreenDestination.AiCenter -> "Central de IA"
-                ScreenDestination.ModelHub -> "Central de Modelos GGUF"
+            if (currentScreen != ScreenDestination.InGamePlayer) {
+                val title = when (currentScreen) {
+                    ScreenDestination.Home -> "OpenX"
+                    ScreenDestination.Projects -> "Projetos"
+                    ScreenDestination.Translation -> "Editor de Tradução"
+                    ScreenDestination.Files -> "Arquivos & APK"
+                    ScreenDestination.Settings -> "Configurações"
+                    ScreenDestination.AiCenter -> "Central de IA"
+                    ScreenDestination.ModelHub -> "Central de Modelos GGUF"
+                    ScreenDestination.PlayerLibrary -> "OpenX Player"
+                    ScreenDestination.GameDetail -> "Detalhes do Jogo"
+                    ScreenDestination.InGamePlayer -> ""
+                }
+                OpenXTopBar(
+                    title = title,
+                    projectName = activeProject?.name,
+                    isOffline = userSession?.isOfflineMode != false,
+                    showBackButton = currentScreen != ScreenDestination.Home,
+                    onBackClick = {
+                        if (currentScreen == ScreenDestination.GameDetail) viewModel.navigateTo(ScreenDestination.PlayerLibrary)
+                        else viewModel.navigateTo(ScreenDestination.Home)
+                    },
+                    onAiCenterClick = { viewModel.navigateTo(ScreenDestination.AiCenter) }
+                )
             }
-            OpenXTopBar(
-                title = title,
-                projectName = activeProject?.name,
-                isOffline = userSession?.isOfflineMode != false,
-                showBackButton = currentScreen != ScreenDestination.Home,
-                onBackClick = { viewModel.navigateTo(ScreenDestination.Home) },
-                onAiCenterClick = { viewModel.navigateTo(ScreenDestination.AiCenter) }
-            )
         },
         bottomBar = {
-            OpenXBottomNavigationBar(
-                currentScreen = currentScreen,
-                onTabSelected = { destination ->
-                    viewModel.navigateTo(destination)
-                }
-            )
+            if (currentScreen != ScreenDestination.InGamePlayer) {
+                OpenXBottomNavigationBar(
+                    currentScreen = currentScreen,
+                    onTabSelected = { destination ->
+                        viewModel.navigateTo(destination)
+                    }
+                )
+            }
         }
     ) { innerPadding ->
         Box(
@@ -411,6 +433,43 @@ fun OpenXApp(viewModel: OpenXViewModel = viewModel()) {
                             onImportModel = { uri, name -> viewModel.importGgufModelFromUri(uri, name) },
                             onUpdateInferenceParams = { viewModel.updateInferenceParams(it) },
                             onRefreshResources = { viewModel.refreshSystemResources() }
+                        )
+                    }
+                    ScreenDestination.PlayerLibrary -> {
+                        GameLibraryScreen(
+                            games = games,
+                            extractionProgress = zipExtractionProgress,
+                            onSelectGame = { viewModel.selectGame(it) },
+                            onPlayGame = { viewModel.playGame(it) },
+                            onTranslateGame = { viewModel.translateGameWithAi(it) },
+                            onImportGameZip = { viewModel.importGameFromZip(it) },
+                            onImportGameFolder = { viewModel.importGameFromFolder(it) },
+                            onPlayDemo = { viewModel.loadDemoGame() }
+                        )
+                    }
+                    ScreenDestination.GameDetail -> {
+                        if (selectedGame != null) {
+                            GameDetailScreen(
+                                game = selectedGame!!,
+                                saveSlots = gameSaves,
+                                onBack = { viewModel.navigateTo(ScreenDestination.PlayerLibrary) },
+                                onPlayGame = { viewModel.playGame(it) },
+                                onTranslateWithAi = { viewModel.translateGameWithAi(it) },
+                                onEditTranslation = { viewModel.translateGameWithAi(it) },
+                                onSelectEngine = { game, engine -> viewModel.selectEngine(game, engine) },
+                                onBackupSaves = { viewModel.backupGameSaves(it) },
+                                onRestoreSaves = { viewModel.restoreGameSaves(it) },
+                                onDeleteSave = { viewModel.deleteGameSave(it) },
+                                onDeleteGame = { viewModel.deleteGame(it) }
+                            )
+                        } else {
+                            viewModel.navigateTo(ScreenDestination.PlayerLibrary)
+                        }
+                    }
+                    ScreenDestination.InGamePlayer -> {
+                        PlayerScreen(
+                            runtimeBridge = viewModel.runtimeBridge,
+                            onExitPlayer = { viewModel.navigateTo(ScreenDestination.PlayerLibrary) }
                         )
                     }
                 }

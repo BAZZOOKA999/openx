@@ -67,4 +67,42 @@ class ExampleUnitTest {
             assertNotNull(LlamaNative.nativeLoadError)
         }
     }
+
+    @Test
+    fun testRenpyEngineManagerRecommendations() {
+        val eng8 = com.example.openx.player.engine.RenpyEngineManager.getRecommendedEngine("Ren'Py 8.3 (Python 3)")
+        assertEquals("renpy_8", eng8.id)
+        assertTrue(eng8.isBundled)
+
+        val eng7 = com.example.openx.player.engine.RenpyEngineManager.getRecommendedEngine("Ren'Py 7.5 (Python 2)")
+        assertEquals("renpy_7", eng7.id)
+
+        val eng699 = com.example.openx.player.engine.RenpyEngineManager.getRecommendedEngine("Ren'Py 6.99 (Legado)")
+        assertEquals("renpy_699", eng699.id)
+    }
+
+    @Test
+    fun testRenpyEngineDetectorInspection() {
+        val tempDir = java.io.File.createTempFile("renpy_test", "")
+        tempDir.delete()
+        tempDir.mkdirs()
+
+        val gameDir = java.io.File(tempDir, "game")
+        gameDir.mkdirs()
+
+        // Write sample script and options
+        java.io.File(gameDir, "script.rpy").writeText("label start:\n    \"Hello!\"\n")
+        java.io.File(gameDir, "options.rpy").writeText("define config.name = \"Shadows of Mist\"\ndefine config.version = \"2.1\"\n")
+        java.io.File(tempDir, "game.exe").writeText("MZ fake windows binary")
+
+        val result = com.example.openx.player.engine.RenpyEngineDetector.inspectDirectory(tempDir)
+        assertEquals("Shadows of Mist", result.title)
+        assertEquals("2.1", result.version)
+        assertEquals(2, result.rpyCount) // script.rpy and options.rpy
+        assertTrue(result.hasWindowsBinaries)
+        assertEquals("COMPATIBLE", result.compatibilityStatus)
+        assertTrue(result.diagnosticSummary.contains("Aviso Seguro"))
+
+        tempDir.deleteRecursively()
+    }
 }
