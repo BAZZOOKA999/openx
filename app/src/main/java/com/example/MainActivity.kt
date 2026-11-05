@@ -63,6 +63,7 @@ import com.example.openx.ui.components.OpenXTopBar
 import com.example.openx.ui.screens.AiCenterScreen
 import com.example.openx.ui.screens.FilesScreen
 import com.example.openx.ui.screens.HomeScreen
+import com.example.openx.ui.screens.ModelHubScreen
 import com.example.openx.ui.screens.ProjectsScreen
 import com.example.openx.ui.screens.SettingsScreen
 import com.example.openx.ui.screens.TranslationScreen
@@ -269,6 +270,7 @@ fun OpenXApp(viewModel: OpenXViewModel = viewModel()) {
                 ScreenDestination.Files -> "Arquivos & APK"
                 ScreenDestination.Settings -> "Configurações"
                 ScreenDestination.AiCenter -> "Central de IA"
+                ScreenDestination.ModelHub -> "Central de Modelos GGUF"
             }
             OpenXTopBar(
                 title = title,
@@ -344,7 +346,8 @@ fun OpenXApp(viewModel: OpenXViewModel = viewModel()) {
                             onAddGlossaryTerm = { src, tgt, dnt, cat, role, gen, rel, pers, speech, notes ->
                                 viewModel.addGlossaryItem(src, tgt, dnt, cat, role, gen, rel, pers, speech, notes)
                             },
-                            onDeleteGlossaryTerm = { id -> viewModel.deleteGlossaryItem(id) }
+                            onDeleteGlossaryTerm = { id -> viewModel.deleteGlossaryItem(id) },
+                            onTranslateSingleUnit = { unit -> viewModel.translateSingleUnit(unit) }
                         )
                     }
                     ScreenDestination.Files -> {
@@ -378,7 +381,36 @@ fun OpenXApp(viewModel: OpenXViewModel = viewModel()) {
                             onDownloadMlKitModel = { lang -> viewModel.downloadMlKitModel(lang) },
                             onDeleteMlKitModel = { lang -> viewModel.deleteMlKitModel(lang) },
                             onSaveApiKeys = { gemini, groq, openRouter -> viewModel.saveApiKeys(gemini, groq, openRouter) },
-                            onClearTm = { viewModel.clearTranslationMemory() }
+                            onClearTm = { viewModel.clearTranslationMemory() },
+                            onNavigateToModelHub = { viewModel.navigateTo(ScreenDestination.ModelHub) }
+                        )
+                    }
+                    ScreenDestination.ModelHub -> {
+                        val ggufModels by viewModel.ggufModels.collectAsState()
+                        val selectedGgufModel by viewModel.selectedGgufModel.collectAsState()
+                        val downloadUpdates by viewModel.downloadUpdates.collectAsState()
+                        val localInferenceStats by viewModel.localInferenceStats.collectAsState()
+                        val inferenceParams by viewModel.inferenceParams.collectAsState()
+                        val memoryStatus by viewModel.memoryStatus.collectAsState()
+                        val storageStatus by viewModel.storageStatus.collectAsState()
+
+                        ModelHubScreen(
+                            models = ggufModels,
+                            selectedModel = selectedGgufModel,
+                            downloadUpdates = downloadUpdates,
+                            localInferenceStats = localInferenceStats,
+                            inferenceParams = inferenceParams,
+                            memoryStatus = memoryStatus,
+                            storageStatus = storageStatus,
+                            cpuCores = viewModel.cpuCores,
+                            onDownloadModel = { viewModel.downloadGgufModel(it) },
+                            onPauseDownload = { viewModel.pauseGgufDownload(it) },
+                            onSelectModel = { viewModel.selectGgufModel(it) },
+                            onDeleteModel = { viewModel.deleteGgufModel(it) },
+                            onVerifySha256 = { viewModel.verifyGgufSha256(it) },
+                            onImportModel = { uri, name -> viewModel.importGgufModelFromUri(uri, name) },
+                            onUpdateInferenceParams = { viewModel.updateInferenceParams(it) },
+                            onRefreshResources = { viewModel.refreshSystemResources() }
                         )
                     }
                 }

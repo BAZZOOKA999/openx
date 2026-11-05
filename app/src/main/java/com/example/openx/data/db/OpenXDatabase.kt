@@ -5,6 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.openx.data.db.dao.BatchQueueDao
+import com.example.openx.data.db.dao.GgufModelDao
 import com.example.openx.data.db.dao.GlossaryDao
 import com.example.openx.data.db.dao.ProjectDao
 import com.example.openx.data.db.dao.TranslationDao
@@ -12,6 +13,7 @@ import com.example.openx.data.db.dao.TranslationMemoryDao
 import com.example.openx.data.db.dao.UserSessionDao
 import com.example.openx.data.db.entities.BatchQueueItemEntity
 import com.example.openx.data.db.entities.FileItemEntity
+import com.example.openx.data.db.entities.GgufModelEntity
 import com.example.openx.data.db.entities.GlossaryEntity
 import com.example.openx.data.db.entities.ProjectEntity
 import com.example.openx.data.db.entities.TranslationMemoryEntity
@@ -26,9 +28,10 @@ import com.example.openx.data.db.entities.UserSessionEntity
         GlossaryEntity::class,
         UserSessionEntity::class,
         TranslationMemoryEntity::class,
-        BatchQueueItemEntity::class
+        BatchQueueItemEntity::class,
+        GgufModelEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class OpenXDatabase : RoomDatabase() {
@@ -38,6 +41,7 @@ abstract class OpenXDatabase : RoomDatabase() {
     abstract fun userSessionDao(): UserSessionDao
     abstract fun translationMemoryDao(): TranslationMemoryDao
     abstract fun batchQueueDao(): BatchQueueDao
+    abstract fun ggufModelDao(): GgufModelDao
 
     companion object {
         @Volatile
@@ -49,7 +53,7 @@ abstract class OpenXDatabase : RoomDatabase() {
                     context.applicationContext,
                     OpenXDatabase::class.java,
                     "openx_local.db"
-                ).fallbackToDestructiveMigration().build()
+                ).fallbackToDestructiveMigration(true).build()
                 INSTANCE = instance
                 instance
             }

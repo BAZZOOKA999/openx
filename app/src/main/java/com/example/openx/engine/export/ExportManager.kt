@@ -127,9 +127,18 @@ object ExportManager {
             zipOut.putNextEntry(zipEntry)
             zipOut.write(content.toByteArray(Charsets.UTF_8))
             zipOut.closeEntry()
+
+            // Preserve original untouched file in backup_original/ folder within ZIP
+            if (file.rawContent.isNotBlank()) {
+                val backupPath = "backup_original/${file.relativePath.ifBlank { file.fileName }}"
+                val backupEntry = ZipEntry(backupPath)
+                zipOut.putNextEntry(backupEntry)
+                zipOut.write(file.rawContent.toByteArray(Charsets.UTF_8))
+                zipOut.closeEntry()
+            }
         }
 
-        // Add an OpenX manifest inside the ZIP for traceability
+        // Add an OpenX manifest inside the ZIP for traceability and confirmation of backups
         val manifestEntry = ZipEntry("openx_export_info.txt")
         zipOut.putNextEntry(manifestEntry)
         val manifestText = """
@@ -141,6 +150,7 @@ object ExportManager {
             Total de Arquivos: ${filesWithUnits.size}
             Total de Segmentos: ${filesWithUnits.sumOf { it.second.size }}
             Status: Pronto para integração no motor Ren'Py ou APK
+            Backup de Segurança: Arquivos originais intactos foram arquivados em 'backup_original/'
             ==================================================
         """.trimIndent()
         zipOut.write(manifestText.toByteArray(Charsets.UTF_8))

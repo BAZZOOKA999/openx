@@ -118,7 +118,8 @@ fun TranslationScreen(
     onPrepareExportReport: () -> Unit,
     onDismissExportReport: () -> Unit,
     onAddGlossaryTerm: (String, String, Boolean, String, String, String, String, String, String, String) -> Unit,
-    onDeleteGlossaryTerm: (Long) -> Unit
+    onDeleteGlossaryTerm: (Long) -> Unit,
+    onTranslateSingleUnit: ((TranslationUnitEntity) -> Unit)? = null
 ) {
     var showFindReplaceDialog by remember { mutableStateOf(false) }
     var showBatchStyleDialog by remember { mutableStateOf(false) }
@@ -445,6 +446,9 @@ fun TranslationScreen(
                         },
                         onSetStatus = { newStatus ->
                             onSetStatus(unit.id, newStatus)
+                        },
+                        onRetranslate = {
+                            onTranslateSingleUnit?.invoke(unit)
                         }
                     )
                 }
@@ -799,10 +803,14 @@ fun TranslationScreen(
 fun TranslationCardItem(
     unit: TranslationUnitEntity,
     onUpdate: (String, TranslationStatus) -> Unit,
-    onSetStatus: (TranslationStatus) -> Unit
+    onSetStatus: (TranslationStatus) -> Unit,
+    onRetranslate: (() -> Unit)? = null
 ) {
     var textValue by remember(unit.id, unit.translatedText) { mutableStateOf(unit.translatedText) }
     var isDirty by remember(unit.id, unit.translatedText) { mutableStateOf(false) }
+    val undoStack = remember(unit.id) { mutableListOf<String>() }
+    val redoStack = remember(unit.id) { mutableListOf<String>() }
+    var showComparisonDialog by remember { mutableStateOf(false) }
 
     val placeholders = remember(unit.originalText) {
         RenpyValidator.extractPlaceholders(unit.originalText).distinct()
@@ -814,6 +822,33 @@ fun TranslationCardItem(
 
     val validation = remember(unit.originalText, textValue) {
         RenpyValidator.validateTranslation(unit.originalText, textValue)
+    }
+
+    fun handleTextChange(newVal: String) {
+        if (newVal != textValue) {
+            undoStack.add(textValue)
+            redoStack.clear()
+            textValue = newVal
+            isDirty = true
+        }
+    }
+
+    fun handleUndo() {
+        if (undoStack.isNotEmpty()) {
+            val prev = undoStack.removeAt(undoStack.lastIndex)
+            redoStack.add(textValue)
+            textValue = prev
+            isDirty = (textValue != unit.translatedText)
+        }
+    }
+
+    fun handleRedo() {
+        if (redoStack.isNotEmpty()) {
+            val next = redoStack.removeAt(redoStack.lastIndex)
+            undoStack.add(textValue)
+            textValue = next
+            isDirty = (textValue != unit.translatedText)
+        }
     }
 
     Card(
@@ -900,7 +935,7 @@ fun TranslationCardItem(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Quick Insert Row (Placeholders, Tags, Copy Original)
+            // Quick Toolbar Row (Copy, Undo, Redo, Compare, Retranslate, Placeholders, Tags)
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -913,8 +948,7 @@ fun TranslationCardItem(
                             .clip(RoundedCornerShape(6.dp))
                             .background(OpenXSurfaceBorder)
                             .clickable {
-                                textValue = unit.originalText
-                                isDirty = true
+                                handleTextChange(unit.originalText)
                             }
                             .padding(horizontal = 6.dp, vertical = 3.dp)
                     ) {
@@ -922,6 +956,79 @@ fun TranslationCardItem(
                             Icon(Icons.Default.ContentCopy, null, tint = OpenXTextSecondary, modifier = Modifier.size(12.dp))
                             Spacer(modifier = Modifier.width(3.dp))
                             Text("Copiar", color = OpenXTextSecondary, fontSize = 10.sp)
+                        }
+                    }
+                }
+
+                // Undo Button
+                item {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (undoStack.isNotEmpty()) OpenXRedContainer else OpenXSurfaceBorder.copy(alpha = 0.5f))
+                            .clickable(enabled = undoStack.isNotEmpty()) { handleUndo() }
+                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = "Desfazer (${undoStack.size})",
+                            color = if (undoStack.isNotEmpty()) OpenXRedLight else OpenXTextSecondary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // Redo Button
+                item {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (redoStack.isNotEmpty()) OpenXRedContainer else OpenXSurfaceBorder.copy(alpha = 0.5f))
+                            .clickable(enabled = redoStack.isNotEmpty()) { handleRedo() }
+                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = "Refazer (${redoStack.size})",
+                            color = if (redoStack.isNotEmpty()) OpenXRedLight else OpenXTextSecondary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // Compare Versions Button
+                item {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(OpenXSurfaceVariant)
+                            .border(1.dp, OpenXSurfaceBorder, RoundedCornerShape(6.dp))
+                            .clickable { showComparisonDialog = true }
+                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.FindReplace, null, tint = OpenXTextPrimary, modifier = Modifier.size(12.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text("Comparar Versões", color = OpenXTextPrimary, fontSize = 10.sp)
+                        }
+                    }
+                }
+
+                // Retranslate Single Unit Button
+                if (onRetranslate != null) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(OpenXRedContainer)
+                                .clickable { onRetranslate() }
+                                .padding(horizontal = 6.dp, vertical = 3.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.AutoAwesome, null, tint = OpenXRed, modifier = Modifier.size(12.dp))
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("Retraduzir IA", color = OpenXRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -934,8 +1041,8 @@ fun TranslationCardItem(
                             .background(OpenXInfoContainer)
                             .border(1.dp, OpenXInfo.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
                             .clickable {
-                                textValue = if (textValue.endsWith(" ") || textValue.isEmpty()) "$textValue$p" else "$textValue $p"
-                                isDirty = true
+                                val nextText = if (textValue.endsWith(" ") || textValue.isEmpty()) "$textValue$p" else "$textValue $p"
+                                handleTextChange(nextText)
                             }
                             .padding(horizontal = 6.dp, vertical = 3.dp)
                     ) {
@@ -951,8 +1058,7 @@ fun TranslationCardItem(
                             .background(OpenXRedContainer)
                             .border(1.dp, OpenXRed.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
                             .clickable {
-                                textValue = "$textValue$t"
-                                isDirty = true
+                                handleTextChange("$textValue$t")
                             }
                             .padding(horizontal = 6.dp, vertical = 3.dp)
                     ) {
@@ -966,10 +1072,7 @@ fun TranslationCardItem(
             // Translated Text Field
             OutlinedTextField(
                 value = textValue,
-                onValueChange = {
-                    textValue = it
-                    isDirty = true
-                },
+                onValueChange = { handleTextChange(it) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("translation_input_${unit.id}"),
@@ -1069,5 +1172,107 @@ fun TranslationCardItem(
                 }
             }
         }
+    }
+
+    // Version Comparison Dialog
+    if (showComparisonDialog) {
+        AlertDialog(
+            onDismissRequest = { showComparisonDialog = false },
+            containerColor = OpenXSurface,
+            title = {
+                Text(
+                    text = "Comparação de Versões #${unit.orderIndex + 1}",
+                    color = OpenXTextPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("Original (Fonte):", color = OpenXTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(OpenXSurfaceVariant)
+                            .padding(8.dp)
+                    ) {
+                        Text(unit.originalText, color = OpenXTextPrimary, fontSize = 12.sp)
+                    }
+
+                    Text("Versão Anterior Salva:", color = OpenXTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(OpenXSurfaceVariant)
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = unit.translatedText.ifBlank { "(Nenhuma tradução prévia salva)" },
+                            color = if (unit.translatedText.isBlank()) OpenXTextSecondary else OpenXTextPrimary,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    Text("Edição Atual / Rascunho:", color = OpenXTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(OpenXRedContainer.copy(alpha = 0.25f))
+                            .border(1.dp, OpenXRed.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = textValue.ifBlank { "(Vazio)" },
+                            color = OpenXTextPrimary,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    // Tag integrity status
+                    if (validation.isValid) {
+                        Text(
+                            text = "Integridade: Todas as tags e variáveis foram preservadas com sucesso.",
+                            color = OpenXSuccess,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    } else {
+                        Text(
+                            text = "Aviso de Sintaxe: ${validation.errorMessage}",
+                            color = OpenXError,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        textValue = unit.translatedText
+                        isDirty = false
+                        undoStack.clear()
+                        redoStack.clear()
+                        showComparisonDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = OpenXSurfaceBorder)
+                ) {
+                    Text("Restaurar Salvo", color = OpenXTextPrimary, fontSize = 11.sp)
+                }
+            },
+            dismissButton = {
+                Button(
+                    onClick = { showComparisonDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = OpenXRed)
+                ) {
+                    Text("Fechar", fontSize = 11.sp)
+                }
+            }
+        )
     }
 }

@@ -12,9 +12,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 
-class TranslationEngine(private val tmDao: TranslationMemoryDao? = null) {
+import com.example.openx.engine.llm.LocalLlmEngine
+
+class TranslationEngine(
+    private val tmDao: TranslationMemoryDao? = null,
+    val localLlmEngine: LocalLlmEngine = LocalLlmEngine()
+) {
 
     private val engines = mapOf(
+        "local_gguf" to localLlmEngine,
         "mlkit" to MlKitTranslationEngine(),
         "firebase_ai" to FirebaseAiEngine(),
         "groq" to GroqTranslationEngine(),

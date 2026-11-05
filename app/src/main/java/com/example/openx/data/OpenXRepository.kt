@@ -33,6 +33,8 @@ class OpenXRepository(private val db: OpenXDatabase) {
     val allProjects: Flow<List<ProjectEntity>> = db.projectDao().getAllProjects()
     val userSession: Flow<UserSessionEntity?> = db.userSessionDao().getSessionFlow()
     val tmCount: Flow<Int> = db.translationMemoryDao().getTotalCountFlow()
+    val allGgufModels: Flow<List<com.example.openx.data.db.entities.GgufModelEntity>> = db.ggufModelDao().getAllModelsFlow()
+    val selectedGgufModel: Flow<com.example.openx.data.db.entities.GgufModelEntity?> = db.ggufModelDao().getSelectedModelFlow()
 
     fun getProjectByIdFlow(id: Long): Flow<ProjectEntity?> = db.projectDao().getProjectByIdFlow(id)
     suspend fun getProjectById(id: Long): ProjectEntity? = db.projectDao().getProjectById(id)

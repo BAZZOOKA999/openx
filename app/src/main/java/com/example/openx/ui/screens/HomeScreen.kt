@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Button
@@ -211,6 +212,40 @@ fun HomeScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Central de IA & Tradução Híbrida", fontWeight = FontWeight.Bold, color = OpenXTextPrimary, fontSize = 13.sp)
                         Text("Google ML Kit (zero custo), Memória de Tradução e Nuvem", color = OpenXTextSecondary, fontSize = 11.sp)
+                    }
+                    Icon(androidx.compose.material.icons.Icons.Default.ChevronRight, null, tint = OpenXRedLight)
+                }
+            }
+        }
+
+        // Central de Modelos GGUF Banner
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .border(1.dp, OpenXRed.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                    .clickable { onNavigate(ScreenDestination.ModelHub) }
+                    .testTag("card_open_model_hub"),
+                colors = CardDefaults.cardColors(containerColor = OpenXSurface)
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(OpenXRed),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Settings, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Central de Modelos Locais (GGUF)", fontWeight = FontWeight.Bold, color = OpenXTextPrimary, fontSize = 13.sp)
+                        Text("Modelos Qwen2.5/Qwen3, importação SAF e llama.cpp", color = OpenXTextSecondary, fontSize = 11.sp)
                     }
                     Icon(androidx.compose.material.icons.Icons.Default.ChevronRight, null, tint = OpenXRedLight)
                 }

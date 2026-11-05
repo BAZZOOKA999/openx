@@ -107,10 +107,20 @@ fun AiCenterScreen(
     onDownloadMlKitModel: (String) -> Unit,
     onDeleteMlKitModel: (String) -> Unit,
     onSaveApiKeys: (gemini: String, groq: String, openRouter: String) -> Unit,
-    onClearTm: () -> Unit
+    onClearTm: () -> Unit,
+    onNavigateToModelHub: () -> Unit = {}
 ) {
     val engines = remember {
         listOf(
+            EngineOption(
+                id = "local_gguf",
+                name = "IA Local GGUF (llama.cpp Offline)",
+                description = "Modelos compactos Qwen2.5/Qwen3 executados diretamente na CPU/GPU do seu aparelho sem internet.",
+                isZeroCost = true,
+                isOffline = true,
+                isExperimental = false,
+                rateLimitText = "Ilimitado • Zero Custo • 100% Offline"
+            ),
             EngineOption(
                 id = "mlkit",
                 name = "Google ML Kit (No Dispositivo)",
@@ -223,6 +233,47 @@ fun AiCenterScreen(
                         fontSize = 12.sp,
                         lineHeight = 17.sp
                     )
+                }
+            }
+        }
+
+        // Shortcut to Central de Modelos GGUF (llama.cpp)
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .border(1.dp, OpenXRed, RoundedCornerShape(14.dp)),
+                colors = CardDefaults.cardColors(containerColor = OpenXRedContainer.copy(alpha = 0.25f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Central de Modelos Locais (GGUF)",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = OpenXTextPrimary,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Baixe modelos Qwen2.5/Qwen3, importe via SAF e monitore RAM/CPU.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OpenXTextSecondary
+                        )
+                    }
+                    Button(
+                        onClick = onNavigateToModelHub,
+                        colors = ButtonDefaults.buttonColors(containerColor = OpenXRed),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.testTag("open_model_hub_button")
+                    ) {
+                        Text("Gerenciar GGUF", fontSize = 12.sp)
+                    }
                 }
             }
         }

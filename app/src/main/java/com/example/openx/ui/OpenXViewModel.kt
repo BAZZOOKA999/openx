@@ -25,6 +25,15 @@ import com.example.openx.engine.translation.EngineConnectionTestResult
 import com.example.openx.engine.translation.TranslationEngine
 import com.example.openx.engine.translation.TranslationProgressState
 import com.example.openx.engine.translation.TranslationStyle
+import com.example.openx.data.db.entities.GgufModelEntity
+import com.example.openx.engine.llm.DeviceMemoryStatus
+import com.example.openx.engine.llm.DeviceStorageStatus
+import com.example.openx.engine.llm.DownloadProgressUpdate
+import com.example.openx.engine.llm.GgufModelManager
+import com.example.openx.engine.llm.LlmInferenceParams
+import com.example.openx.engine.llm.LocalInferenceStats
+import com.example.openx.engine.llm.LocalLlmEngine
+import com.example.openx.engine.llm.SystemResourceUtil
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,6 +53,7 @@ sealed class ScreenDestination(val route: String) {
     object Files : ScreenDestination("files")
     object Settings : ScreenDestination("settings")
     object AiCenter : ScreenDestination("ai_center")
+    object ModelHub : ScreenDestination("model_hub")
 }
 
 data class TranslationFilterState(
@@ -56,10 +66,33 @@ class OpenXViewModel(application: Application) : AndroidViewModel(application) {
 
     val db = OpenXDatabase.getInstance(application)
     val repository = OpenXRepository(db)
-    val translationEngine = TranslationEngine(db.translationMemoryDao())
+    val localLlmEngine = LocalLlmEngine(db.ggufModelDao())
+    val translationEngine = TranslationEngine(db.translationMemoryDao(), localLlmEngine)
+    val ggufModelManager = GgufModelManager(application, db.ggufModelDao())
 
     val projects: StateFlow<List<ProjectEntity>> = repository.allProjects
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val ggufModels: StateFlow<List<GgufModelEntity>> = repository.allGgufModels
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val selectedGgufModel: StateFlow<GgufModelEntity?> = repository.selectedGgufModel
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val downloadUpdates: StateFlow<Map<Long, DownloadProgressUpdate>> = ggufModelManager.downloadUpdates
+
+    val localInferenceStats: StateFlow<LocalInferenceStats> = localLlmEngine.stats
+
+    private val _inferenceParams = MutableStateFlow(LlmInferenceParams())
+    val inferenceParams: StateFlow<LlmInferenceParams> = _inferenceParams.asStateFlow()
+
+    private val _memoryStatus = MutableStateFlow(SystemResourceUtil.getMemoryInfo(application))
+    val memoryStatus: StateFlow<DeviceMemoryStatus> = _memoryStatus.asStateFlow()
+
+    private val _storageStatus = MutableStateFlow(SystemResourceUtil.getStorageInfo(application))
+    val storageStatus: StateFlow<DeviceStorageStatus> = _storageStatus.asStateFlow()
+
+    val cpuCores: Int = SystemResourceUtil.getCpuCores()
 
     val userSession: StateFlow<UserSessionEntity?> = repository.userSession
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -104,6 +137,7 @@ class OpenXViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             SampleDataGenerator.populateInitialDataIfEmpty(db)
             MlKitManager.refreshModelStatuses()
+            ggufModelManager.initializeCatalog()
             val firstProject = repository.allProjects.firstOrNull()?.firstOrNull()
             if (_selectedProjectId.value == null && firstProject != null) {
                 _selectedProjectId.value = firstProject.id
@@ -141,6 +175,43 @@ class OpenXViewModel(application: Application) : AndroidViewModel(application) {
     fun updateUnitStatus(unitId: Long, newStatus: TranslationStatus) {
         viewModelScope.launch {
             repository.setUnitStatus(unitId, newStatus)
+        }
+    }
+
+    fun translateSingleUnit(unit: TranslationUnitEntity) {
+        viewModelScope.launch {
+            try {
+                _toastMessage.emit("Traduzindo segmento #${unit.orderIndex + 1}...")
+                val proj = repository.getProjectById(unit.projectId)
+                val targetLang = proj?.targetLang ?: "pt-BR"
+                val sourceLang = proj?.sourceLang ?: "en"
+                val glossary = repository.getGlossaryForProjectSync(unit.projectId)
+
+                val req = com.example.openx.engine.translation.TranslationRequest(
+                    text = unit.originalText,
+                    sourceLang = sourceLang,
+                    targetLang = targetLang,
+                    context = com.example.openx.engine.translation.EngineContext(
+                        speaker = unit.speaker,
+                        surroundingContext = unit.keyOrContext,
+                        glossary = glossary,
+                        style = com.example.openx.engine.translation.TranslationStyle.NATURAL
+                    )
+                )
+
+                val engineId = userSession.value?.selectedEngineId ?: "local_gguf"
+                val engine = translationEngine.getEngine(engineId)
+                val resp = engine.translate(req)
+
+                if (resp.isSuccess && resp.translatedText.isNotBlank()) {
+                    updateTranslation(unit.id, resp.translatedText, TranslationStatus.TRANSLATED)
+                    _toastMessage.emit("Segmento #${unit.orderIndex + 1} traduzido com sucesso!")
+                } else {
+                    _toastMessage.emit("Falha ao traduzir: ${resp.errorMessage ?: "Erro no motor local"}")
+                }
+            } catch (e: Exception) {
+                _toastMessage.emit("Erro ao traduzir: ${e.message}")
+            }
         }
     }
 
@@ -535,6 +606,105 @@ class OpenXViewModel(application: Application) : AndroidViewModel(application) {
                 _selectedProjectId.value = next?.id
             }
             _toastMessage.emit("Projeto excluído com sucesso.")
+        }
+    }
+
+    fun downloadGgufModel(modelId: Long) {
+        viewModelScope.launch {
+            try {
+                _toastMessage.emit("Iniciando download do modelo GGUF...")
+                ggufModelManager.downloadModel(modelId)
+            } catch (e: Exception) {
+                _toastMessage.emit("Erro no download: ${e.message}")
+            }
+        }
+    }
+
+    fun pauseGgufDownload(modelId: Long) {
+        try {
+            ggufModelManager.pauseDownload(modelId)
+        } catch (_: Exception) {
+        }
+    }
+
+    fun selectGgufModel(modelId: Long) {
+        viewModelScope.launch {
+            try {
+                ggufModelManager.selectModel(modelId)
+                val model = db.ggufModelDao().getModelById(modelId)
+                if (model != null) {
+                    val current = userSession.value ?: UserSessionEntity()
+                    repository.saveSession(
+                        current.copy(
+                            selectedEngineId = "local_gguf",
+                            selectedModelName = model.name
+                        )
+                    )
+                    _toastMessage.emit("Modelo ${model.name} ativado como motor padrão!")
+                }
+            } catch (e: Exception) {
+                _toastMessage.emit("Erro ao ativar modelo: ${e.message}")
+            }
+        }
+    }
+
+    fun deleteGgufModel(modelId: Long) {
+        viewModelScope.launch {
+            try {
+                ggufModelManager.deleteModel(modelId)
+                _toastMessage.emit("Modelo excluído com sucesso.")
+            } catch (e: Exception) {
+                _toastMessage.emit("Erro ao excluir modelo: ${e.message}")
+            }
+        }
+    }
+
+    fun verifyGgufSha256(modelId: Long) {
+        viewModelScope.launch {
+            try {
+                _toastMessage.emit("Calculando hash SHA-256 do arquivo GGUF...")
+                val hash = ggufModelManager.verifyModelSha256(modelId)
+                _toastMessage.emit("Hash verificado: ${hash.take(16)}...")
+            } catch (e: Exception) {
+                _toastMessage.emit("Erro ao verificar SHA-256: ${e.message}")
+            }
+        }
+    }
+
+    fun importGgufModelFromUri(uri: Uri, displayName: String) {
+        viewModelScope.launch {
+            try {
+                _toastMessage.emit("Importando arquivo GGUF via SAF...")
+                val result = ggufModelManager.importModelFromUri(uri, displayName)
+                if (result.isSuccess) {
+                    val model = result.getOrNull()
+                    _toastMessage.emit("Modelo GGUF importado com sucesso!")
+                    if (model != null) {
+                        selectGgufModel(model.id)
+                    }
+                } else {
+                    _toastMessage.emit("Erro na importação: ${result.exceptionOrNull()?.message}")
+                }
+            } catch (e: Exception) {
+                _toastMessage.emit("Erro na importação: ${e.message}")
+            }
+        }
+    }
+
+    fun updateInferenceParams(params: LlmInferenceParams) {
+        _inferenceParams.value = params
+        localLlmEngine.inferenceParams = params
+        viewModelScope.launch {
+            _toastMessage.emit("Parâmetros do motor local atualizados.")
+        }
+    }
+
+    fun refreshSystemResources() {
+        try {
+            _memoryStatus.value = SystemResourceUtil.getMemoryInfo(getApplication())
+            _storageStatus.value = SystemResourceUtil.getStorageInfo(getApplication())
+        } catch (_: Exception) {
+            // Safe fallback
         }
     }
 }
